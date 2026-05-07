@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CarbonBridge – Verified Carbon Credit Marketplace</title>
+    <meta name="description" content="Buy, sell, and retire verified carbon credits." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌉</text></svg>" />
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+        
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{font-family:'DM Sans',sans-serif;background:#04080f;color:#e2e8f0;}
+        input,select,textarea{font-family:'DM Sans',sans-serif;}
+        ::-webkit-scrollbar{width:6px;}
+        ::-webkit-scrollbar-track{background:#0d1117;}
+        ::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:3px;}
+        
+        @keyframes fadeIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+        
+        .fade{animation:fadeIn .4s ease forwards;}
+        .spin{animation:spin 1s linear infinite;}
+        .float{animation:float 4s ease-in-out infinite;}
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        // =========== CREDIT DATA ===========
+        const CREDITS = [
+            { id:1, name:"Amazon Rainforest REDD+", type:"Forestry", country:"Brazil", registry:"Verra VCS", price:14.5, vintage:2023, available:12400, certId:"VCS-2301-BR", sdgs:[13,15,1], color:"#22c55e", icon:"🌿", desc:"Protects 180,000 hectares of threatened Amazon rainforest." },
+            { id:2, name:"Solar Farm Gujarat", type:"Renewable Energy", country:"India", registry:"Gold Standard", price:9.8, vintage:2023, available:8200, certId:"GS-4521-IN", desc:"25MW solar for 40,000 rural households in Gujarat.", sdgs:[7,13,8], color:"#f59e0b", icon:"☀️" },
+            { id:3, name:"Kenya Clean Cookstoves", type:"Clean Cooking", country:"Kenya", registry:"Gold Standard", price:18.2, vintage:2022, available:3100, certId:"GS-3876-KE", desc:"Efficient cookstoves for 25,000 families.", sdgs:[3,5,13], color:"#06b6d4", icon:"🔥" },
+            { id:4, name:"Mangrove Restoration", type:"Blue Carbon", country:"Indonesia", registry:"Verra VCS", price:22.0, vintage:2023, available:5600, certId:"VCS-1987-ID", desc:"Restores 8,500 hectares of mangrove ecosystems.", sdgs:[14,13,15], color:"#8b5cf6", icon:"🌊" },
+            { id:5, name:"Wind Power Rajasthan", type:"Renewable Energy", country:"India", registry:"ACR", price:7.5, vintage:2022, available:15000, certId:"ACR-6643-IN", desc:"150MW wind farm replacing thermal power.", sdgs:[7,13,9], color:"#ec4899", icon:"💨" },
+            { id:6, name:"Borneo Peatland Protection", type:"Conservation", country:"Malaysia", registry:"Verra VCS", price:26.0, vintage:2023, available:2800, certId:"VCS-2089-MY", desc:"Protects 45,000 hectares of carbon-rich peatland.", sdgs:[15,13,6], color:"#10b981", icon:"🌳" },
+            { id:7, name:"Methane Capture Landfill", type:"Waste Management", country:"Mexico", registry:"Verra VCS", price:11.0, vintage:2023, available:9500, certId:"VCS-3312-MX", desc:"Converts landfill methane to electricity.", sdgs:[7,11,13], color:"#f97316", icon:"♻️" },
+            { id:8, name:"Himalayan Biogas", type:"Clean Energy", country:"Nepal", registry:"Gold Standard", price:16.5, vintage:2022, available:4200, certId:"GS-2241-NP", desc:"Biogas digesters for 12,000 Nepali homes.", sdgs:[7,3,13], color:"#a3e635", icon:"⚡" }
+        ];
+
+        const SDG_MAP = { 1:"No Poverty", 3:"Good Health", 5:"Gender Equality", 6:"Clean Water", 7:"Clean Energy", 8:"Decent Work", 9:"Industry Innovation", 11:"Sustainable Cities", 13:"Climate Action", 14:"Life Below Water", 15:"Life on Land" };
+        
+        // =========== STORAGE (Mock Backend) ===========
+        const storage = {
+            users: JSON.parse(localStorage.getItem('cb_users') || '[]'),
+            orders: JSON.parse(localStorage.getItem('cb_orders') || '[]'),
+            saveUsers: function() { localStorage.setItem('cb_users', JSON.stringify(this.users)); },
+            saveOrders: function() { localStorage.setItem('cb_orders', JSON.stringify(this.orders)); },
+            findUser: function(email) { return this.users.find(u => u.email === email); },
+            addUser: function(user) { this.users.push(user); this.saveUsers(); },
+            addOrder: function(order) { this.orders.push(order); this.saveOrders(); },
+            getUserOrders: function(userId) { return this.orders.filter(o => o.userId === userId); }
+        };
+
+        // =========== UTILITIES ===========
+        const genId = () => 'CB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        const genOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
+        const fmtUSD = (n) => '$' + Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        
+        // =========== THEME ===========
+        const T = {
+            bg:"#04080f",bg1:"#080d17",bg2:"#0d1525",bg3:"#111d30",
+            border:"rgba(56,189,248,0.12)",border2:"rgba(56,189,248,0.25)",
+            teal:"#38bdf8",tealDark:"#0ea5e9",green:"#34d399",greenDark:"#10b981",
+            text:"#e2e8f0",text2:"#94a3b8",text3:"#64748b",
+            grad:"linear-gradient(135deg, #0ea5e9, #34d399)",
+        };
+
+        // =========== UI COMPONENTS ===========
+        function Btn({ children, onClick, variant="primary", size="md", full=false, disabled=false, style:sx={} }) {
+            const base={display:"inline-flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"'Outfit',sans-serif",fontWeight:700,cursor:disabled?"not-allowed":"pointer",borderRadius:10,border:"none",transition:"all .2s",opacity: disabled ? 0.6 : 1,...sx};
+            const sz=size==="sm"?{padding:"7px 16px",fontSize:13}:size==="lg"?{padding:"14px 28px",fontSize:16}:{padding:"10px 22px",fontSize:14};
+            const vars={primary:{background:T.grad,color:"#fff",boxShadow:"0 0 24px rgba(56,189,248,0.25)"},outline:{background:"transparent",color:T.teal,border:`1.5px solid ${T.teal}`},ghost:{background:"rgba(56,189,248,0.07)",color:T.teal},danger:{background:"rgba(239,68,68,0.15)",color:"#f87171",border:"1px solid rgba(239,68,68,0.3)"},success:{background:"rgba(52,211,153,0.15)",color:T.green,border:`1px solid rgba(52,211,153,0.3)`}};
+            const finalStyle = { ...base, ...sz, ...(vars[variant] || {}) };
+            if(full) finalStyle.width = "100%";
+            return React.createElement("button", { onClick: disabled ? null : onClick, style: finalStyle }, children);
+        }
+
+        function Card({ children, style:sx={} }) {
+            return React.createElement("div", { style: { background:T.bg2, border:`1px solid ${T.border}`, borderRadius:20, ...sx } }, children);
+        }
+
+        function Badge({ children, color="#38bdf8" }) {
+            return React.createElement("span", { style: { background:`${color}18`, color, border:`1px solid ${color}30`, borderRadius:20, padding:"3px 10px", fontSize:11, fontWeight:700 } }, children);
+        }
+
+        function Inp({ label, type="text", value, onChange, placeholder, icon, error, hint }) {
+            const id = "input-" + Math.random().toString(36).substr(2, 9);
+            return React.createElement("div", { style: { marginBottom: 18 } },
+                label && React.createElement("label", { htmlFor: id, style: { display:"block", fontSize:13, fontWeight:600, color:T.text2, marginBottom:6 } }, label),
+                React.createElement("div", { style: { position:"relative" } },
+                    icon && React.createElement("span", { style: { position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, color:T.text3, pointerEvents:"none" } }, icon),
+                    React.createElement("input", {
+                        id, type, value, placeholder,
+                        onChange: e => onChange(e.target.value),
+                        style: { width:"100%", background:T.bg2, border:`1.5px solid ${error?"#f87171":T.border}`, borderRadius:10, padding:`11px ${icon?"40px":"14px"} 11px ${icon?"40px":"14px"}`, color:T.text, fontSize:14, outline:"none" },
+                        onFocus: e => { e.target.style.borderColor = T.teal; },
+                        onBlur: e => { e.target.style.borderColor = error?"#f87171":T.border; }
+                    })
+                ),
+                error && React.createElement("p", { style: { fontSize:12, color:"#f87171", marginTop:4 } }, error),
+                hint && !error && React.createElement("p", { style: { fontSize:12, color:T.text3, marginTop:4 } }, hint)
+            );
+        }
+
+        function Spinner() {
+            return React.createElement("span", { className: "spin", style: { display:"inline-block", width:20, height:20, border:`2.5px solid rgba(56,189,248,0.2)`, borderTopColor:T.teal, borderRadius:"50%" } });
+        }
+
+        function ProgressBar({ steps, current }) {
+            return React.createElement("div", { style: { display:"flex", alignItems:"center", marginBottom:32 } },
+                steps.map((s, i) => React.createElement("div", { key: i, style: { display:"flex", alignItems:"center", flex: i < steps.length-1 ? 1 : undefined } },
+                    React.createElement("div", { style: { display:"flex", flexDirection:"column", alignItems:"center", gap:4 } },
+                        React.createElement("div", { style: { width:32, height:32, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, background:i<current?T.grad:i===current?"rgba(56,189,248,0.2)":T.bg3, border:i<=current?`2px solid ${T.teal}`:`2px solid ${T.border}`, color:i<current?"#fff":i===current?T.teal:T.text3 } }, i<current?"✓":i+1),
+                        React.createElement("span", { style: { fontSize:10, color:i<=current?T.teal:T.text3, fontWeight:600, whiteSpace:"nowrap" } }, s)
+                    ),
+                    i < steps.length-1 && React.createElement("div", { style: { flex:1, height:2, background:i<current?T.grad:T.border, margin:"0 4px", marginBottom:14 } })
+                ))
+            );
+        }
+
+        // =========== PAGES ===========
+        function Home({ setPage }) {
+            const [featured, setFeatured] = useState([]);
+            useEffect(() => { setFeatured(CREDITS.slice(0, 3)); }, []);
+            const stats=[{v:"2,300+",l:"Registered Projects"},{v:"4.8M",l:"Tonnes CO₂ Offset"},{v:"18,400+",l:"Active Users"},{v:"47",l:"Countries"}];
+            const steps=[{icon:"🔐",t:"Register & Verify",d:"Sign up and complete KYC in under 5 minutes."},{icon:"🔍",t:"Browse Projects",d:"Explore verified credits from Verra, Gold Standard & ACR."},{icon:"💳",t:"Buy Credits",d:"Purchase any quantity. Credits added to wallet instantly."},{icon:"📜",t:"Retire & Certify",d:"Retire credits and download your official certificate."}];
+            
+            return React.createElement("div", { className: "fade" },
+                React.createElement("div", { style: { minHeight:"88vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", padding:"80px 24px 60px", position:"relative", overflow:"hidden" } },
+                    React.createElement("div", { style: { position:"absolute", inset:0, background:"radial-gradient(ellipse 80% 50% at 50% -10%, rgba(14,165,233,0.12), transparent 65%)", pointerEvents:"none" } }),
+                    React.createElement("div", { style: { background:"rgba(56,189,248,0.08)", border:"1px solid rgba(56,189,248,0.25)", borderRadius:24, padding:"7px 20px", marginBottom:28, fontSize:13, color:T.teal, fontWeight:600 } }, "🏢 Developed by Nomad Life Corporation"),
+                    React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:"clamp(38px,7vw,76px)", fontWeight:900, lineHeight:1.05, marginBottom:24, maxWidth:900 } }, 
+                        "Trade Verified ",
+                        React.createElement("span", { style: { background:T.grad, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" } }, "Carbon Credits"),
+                        " with Confidence"
+                    ),
+                    React.createElement("p", { style: { fontSize:18, color:T.text2, maxWidth:560, lineHeight:1.75, marginBottom:44 } }, "The world's most trusted marketplace for buying, selling, and retiring verified carbon credits — for individuals, businesses, and project developers."),
+                    React.createElement("div", { style: { display:"flex", gap:14, flexWrap:"wrap", justifyContent:"center" } },
+                        React.createElement(Btn, { size:"lg", onClick:() => setPage("register"), style: { boxShadow:"0 0 48px rgba(14,165,233,0.35)" } }, "Start Offsetting Free →"),
+                        React.createElement(Btn, { size:"lg", variant:"outline", onClick:() => setPage("marketplace") }, "Browse Credits")
+                    ),
+                    React.createElement("div", { style: { display:"flex", gap:20, marginTop:72, flexWrap:"wrap", justifyContent:"center" } },
+                        stats.map(s => React.createElement("div", { key: s.l, style: { background:"rgba(255,255,255,0.025)", border:`1px solid ${T.border}`, borderRadius:16, padding:"20px 32px", textAlign:"center" } },
+                            React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:28, fontWeight:900, background:T.grad, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" } }, s.v),
+                            React.createElement("div", { style: { fontSize:12, color:T.text3, marginTop:4, fontWeight:500 } }, s.l)
+                        ))
+                    )
+                ),
+                React.createElement("div", { style: { borderTop:`1px solid ${T.border}`, borderBottom:`1px solid ${T.border}`, padding:"16px 40px", background:T.bg1, display:"flex", alignItems:"center", justifyContent:"center", gap:40, flexWrap:"wrap" } },
+                    React.createElement("span", { style: { fontSize:11, color:T.text3, fontWeight:700, textTransform:"uppercase" } }, "Verified By"),
+                    ...["Verra VCS","Gold Standard","ACR","Climate Reserve","Puro.earth"].map(p => React.createElement("span", { key: p, style: { fontSize:13, fontWeight:700, color:T.text2, opacity:.7 } }, p))
+                ),
+                React.createElement("div", { style: { padding:"80px 40px", maxWidth:1100, margin:"0 auto" } },
+                    React.createElement("div", { style: { textAlign:"center", marginBottom:52 } },
+                        React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontSize:36, fontWeight:800, marginBottom:10 } }, "Offset in 4 Simple Steps")
+                    ),
+                    React.createElement("div", { style: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))", gap:24 } },
+                        steps.map((s, i) => React.createElement("div", { key: i, style: { background:T.bg2, border:`1px solid ${T.border}`, borderRadius:20, padding:28, position:"relative", overflow:"hidden" } },
+                            React.createElement("div", { style: { position:"absolute", top:-8, right:-8, fontFamily:"'Outfit',sans-serif", fontSize:72, fontWeight:900, color:"rgba(56,189,248,0.04)", lineHeight:1 } }, i+1),
+                            React.createElement("div", { style: { fontSize:38, marginBottom:14 } }, s.icon),
+                            React.createElement("h3", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:16, marginBottom:8 } }, s.t),
+                            React.createElement("p", { style: { color:T.text2, fontSize:14, lineHeight:1.6 } }, s.d)
+                        ))
+                    )
+                ),
+                featured.length > 0 && React.createElement("div", { style: { padding:"60px 40px", background:T.bg1, borderTop:`1px solid ${T.border}` } },
+                    React.createElement("div", { style: { maxWidth:1100, margin:"0 auto" } },
+                        React.createElement("div", { style: { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:32, flexWrap:"wrap", gap:16 } },
+                            React.createElement("div", null, React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontSize:30, fontWeight:800 } }, "Featured Projects")),
+                            React.createElement(Btn, { variant:"outline", onClick:() => setPage("marketplace") }, "View All →")
+                        ),
+                        React.createElement("div", { style: { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:20 } },
+                            featured.map(c => React.createElement("div", { key: c.id, onClick:() => setPage("marketplace"), style: { background:"#0d1525", border:`1.5px solid rgba(56,189,248,0.12)`, borderRadius:20, padding:24, cursor:"pointer", transition:"all .25s" } },
+                                React.createElement("div", { style: { display:"flex", justifyContent:"space-between", marginBottom:10 } },
+                                    React.createElement(Badge, { color: c.color }, c.type),
+                                    React.createElement("span", { style: { fontSize:12, color:T.text3 } }, c.country)
+                                ),
+                                React.createElement("div", { style: { fontSize:28, marginBottom:8 } }, c.icon),
+                                React.createElement("h3", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:15, marginBottom:8 } }, c.name),
+                                React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:22, fontWeight:900, color:T.green } }, `$${c.price.toFixed(2)}`, React.createElement("span", { style: { fontSize:12, fontWeight:400, color:T.text3 } }, "/t"))
+                            ))
+                        )
+                    )
+                ),
+                React.createElement("div", { style: { padding:"80px 40px", textAlign:"center", background:`radial-gradient(ellipse 60% 80% at 50% 50%, rgba(14,165,233,0.07), transparent)` } },
+                    React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontSize:40, fontWeight:900, marginBottom:14 } }, "Ready to Make an Impact?"),
+                    React.createElement("p", { style: { color:T.text2, fontSize:16, maxWidth:460, margin:"0 auto 32px" } }, "Join 18,000+ individuals and 2,000+ companies already offsetting on CarbonBridge."),
+                    React.createElement(Btn, { size:"lg", onClick:() => setPage("register"), style: { boxShadow:"0 0 48px rgba(14,165,233,0.3)" } }, "Create Free Account →")
+                ),
+                React.createElement("footer", { style: { borderTop:`1px solid ${T.border}`, background:T.bg1, padding:"48px 40px 24px" } },
+                    React.createElement("div", { style: { maxWidth:1100, margin:"0 auto" } },
+                        React.createElement("div", { style: { display:"flex", alignItems:"center", gap:10, marginBottom:20 } },
+                            React.createElement("div", { style: { width:32, height:32, borderRadius:8, background:T.grad, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 } }, "🌉"),
+                            React.createElement("div", null,
+                                React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:900, fontSize:16, background:T.grad, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" } }, "CarbonBridge"),
+                                React.createElement("div", { style: { fontSize:9, color:T.text3 } }, "by Nomad Life Corporation")
+                            )
+                        ),
+                        React.createElement("div", { style: { height:1, background:T.border, margin:"16px 0" } }),
+                        React.createElement("div", { style: { display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8 } },
+                            React.createElement("span", { style: { fontSize:12, color:T.text3 } }, "© 2026 Nomad Life Corporation. All rights reserved."),
+                            React.createElement("span", { style: { fontSize:12, color:T.text3 } }, "🌍 Building a net-zero world, one credit at a time.")
+                        )
+                    )
+                )
+            );
+        }
+
+        function Marketplace({ setPage, setSelectedCredit }) {
+            const [credits, setCredits] = useState(CREDITS);
+            const [filter, setFilter] = useState("All");
+            const [search, setSearch] = useState("");
+            const [sort, setSort] = useState("price-asc");
+            
+            const types = ["All","Forestry","Renewable Energy","Clean Cooking","Blue Carbon","Conservation","Waste Management","Clean Energy"];
+            
+            const filtered = credits.filter(c => {
+                if (filter !== "All" && c.type !== filter) return false;
+                if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.country.toLowerCase().includes(search.toLowerCase())) return false;
+                return true;
+            }).sort((a,b) => {
+                if (sort === "price-asc") return a.price - b.price;
+                if (sort === "price-desc") return b.price - a.price;
+                if (sort === "available") return b.available - a.available;
+                return 0;
+            });
+            
+            return React.createElement("div", { className: "fade", style: { maxWidth:1200, margin:"0 auto", padding:"40px 24px" } },
+                React.createElement("div", { style: { marginBottom:28 } },
+                    React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:32, fontWeight:800, marginBottom:6 } }, "Carbon Credit Marketplace"),
+                    React.createElement("p", { style: { color:T.text2 } }, filtered.length + " verified projects")
+                ),
+                React.createElement("div", { style: { display:"flex", gap:12, marginBottom:18, flexWrap:"wrap" } },
+                    React.createElement("input", {
+                        value: search, onChange: e => setSearch(e.target.value), placeholder:"🔍 Search projects…",
+                        style: { flex:1, minWidth:200, background:T.bg2, border:`1.5px solid ${T.border}`, borderRadius:10, padding:"10px 16px", color:T.text, fontSize:14, outline:"none" }
+                    }),
+                    React.createElement("select", { value: sort, onChange: e => setSort(e.target.value), style: { background:T.bg2, border:`1.5px solid ${T.border}`, borderRadius:10, padding:"10px 14px", color:T.text, fontSize:13, outline:"none" } },
+                        React.createElement("option", { value:"price-asc" }, "Price: Low→High"),
+                        React.createElement("option", { value:"price-desc" }, "Price: High→Low"),
+                        React.createElement("option", { value:"available" }, "Most Available")
+                    )
+                ),
+                React.createElement("div", { style: { display:"flex", gap:8, marginBottom:28, flexWrap:"wrap" } },
+                    types.map(f => React.createElement("button", { key: f, onClick:() => setFilter(f), style: { background:filter===f?"rgba(14,165,233,0.15)":"rgba(255,255,255,0.04)", color:filter===f?T.teal:T.text2, border:`1px solid ${filter===f?T.teal:T.border}`, borderRadius:20, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:600 } }, f))
+                ),
+                React.createElement("div", { style: { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))", gap:20 } },
+                    filtered.map(c => React.createElement("div", { key: c.id, onClick:() => { setSelectedCredit(c); setPage("detail"); }, style: { background:"#0d1525", border:`1.5px solid rgba(56,189,248,0.12)`, borderRadius:20, padding:24, cursor:"pointer", transition:"all .25s" } },
+                        React.createElement("div", { style: { display:"flex", justifyContent:"space-between", marginBottom:14 } },
+                            React.createElement(Badge, { color: c.color }, c.type),
+                            React.createElement("span", { style: { fontSize:12, color:T.text3 } }, "🏳️ " + c.country)
+                        ),
+                        React.createElement("div", { style: { fontSize:28, marginBottom:8 } }, c.icon),
+                        React.createElement("h3", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:16, marginBottom:8, lineHeight:1.3 } }, c.name),
+                        React.createElement("div", { style: { display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" } },
+                            React.createElement(Badge, { color:T.text3 }, c.registry),
+                            React.createElement(Badge, { color:T.text3 }, "Vintage " + c.vintage)
+                        ),
+                        React.createElement("div", { style: { display:"flex", justifyContent:"space-between", alignItems:"flex-end" } },
+                            React.createElement("div", null,
+                                React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:24, fontWeight:900, color:T.green } }, `$${c.price.toFixed(2)}`),
+                                React.createElement("div", { style: { fontSize:11, color:T.text3 } }, "per tonne CO₂")
+                            ),
+                            React.createElement("div", { style: { textAlign:"right" } },
+                                React.createElement("div", { style: { fontSize:12, color:T.text2, fontWeight:600 } }, c.available.toLocaleString()),
+                                React.createElement("div", { style: { fontSize:11, color:T.text3 } }, "credits left")
+                            )
+                        )
+                    ))
+                )
+            );
+        }
+
+        function CreditDetail({ credit, setPage, user }) {
+            const [qty, setQty] = useState(1);
+            if (!credit) { setPage("marketplace"); return null; }
+            const total = qty * credit.price;
+            return React.createElement("div", { className: "fade", style: { maxWidth:1100, margin:"0 auto", padding:"40px 24px" } },
+                React.createElement("button", { onClick:() => setPage("marketplace"), style: { background:"transparent", color:T.teal, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:13, marginBottom:28 } }, "← Back"),
+                React.createElement("div", { style: { display:"grid", gridTemplateColumns:"1fr 340px", gap:28, alignItems:"start" } },
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" } },
+                            React.createElement(Badge, { color: credit.color }, credit.type),
+                            React.createElement(Badge, { color: T.green }, credit.registry),
+                            React.createElement(Badge, { color: T.text3 }, "Vintage " + credit.vintage)
+                        ),
+                        React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:32, fontWeight:900, marginBottom:6 } }, credit.name),
+                        React.createElement("p", { style: { color:T.text2, fontSize:14, marginBottom:20 } }, "📍 " + credit.country + " • 🔖 " + credit.certId),
+                        React.createElement(Card, { style: { padding:24, marginBottom:18 } },
+                            React.createElement("h3", { style: { fontWeight:700, marginBottom:10 } }, "About"),
+                            React.createElement("p", { style: { color:T.text2, lineHeight:1.75, fontSize:14 } }, credit.desc)
+                        ),
+                        React.createElement(Card, { style: { padding:24, marginBottom:18 } },
+                            React.createElement("h3", { style: { fontWeight:700, marginBottom:14 } }, "SDG Alignment"),
+                            React.createElement("div", { style: { display:"flex", gap:8, flexWrap:"wrap" } },
+                                credit.sdgs.map(s => React.createElement("div", { key: s, style: { background:"rgba(56,189,248,0.08)", border:`1px solid ${T.border}`, borderRadius:10, padding:"8px 12px", fontSize:13, color:T.teal, fontWeight:600 } }, "🎯 SDG " + s + " — " + SDG_MAP[s]))
+                            )
+                        ),
+                        React.createElement(Card, { style: { padding:24 } },
+                            React.createElement("h3", { style: { fontWeight:700, marginBottom:14 } }, "Registry Info"),
+                            React.createElement("div", { style: { display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 } },
+                                [["Registry",credit.registry],["Certificate",credit.certId],["Vintage",credit.vintage],["Available",credit.available.toLocaleString()+"t"]].map(([k,v]) =>
+                                    React.createElement("div", { key: k, style: { background:T.bg3, borderRadius:10, padding:"12px 14px" } },
+                                        React.createElement("div", { style: { fontSize:11, color:T.text3, marginBottom:3, textTransform:"uppercase" } }, k),
+                                        React.createElement("div", { style: { fontSize:14, fontWeight:600 } }, v)
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    React.createElement("div", { style: { position:"sticky", top:80 } },
+                        React.createElement(Card, { style: { padding:28 } },
+                            React.createElement("div", { style: { marginBottom:22 } },
+                                React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:36, fontWeight:900, color:T.green } }, fmtUSD(credit.price)),
+                                React.createElement("div", { style: { fontSize:13, color:T.text3 } }, "per tonne CO₂")
+                            ),
+                            React.createElement("div", { style: { marginBottom:18 } },
+                                React.createElement("label", { style: { display:"block", fontSize:13, fontWeight:600, color:T.text2, marginBottom:8 } }, "Quantity (tonnes)"),
+                                React.createElement("div", { style: { display:"flex", alignItems:"center", gap:10 } },
+                                    React.createElement("button", { onClick:() => setQty(Math.max(1,qty-1)), style: { width:38, height:38, borderRadius:10, background:T.bg3, border:`1px solid ${T.border}`, color:T.teal, fontSize:20, cursor:"pointer" } }, "−"),
+                                    React.createElement("div", { style: { flex:1, textAlign:"center", fontFamily:"'Outfit',sans-serif", fontSize:24, fontWeight:800 } }, qty),
+                                    React.createElement("button", { onClick:() => setQty(Math.min(credit.available,qty+1)), style: { width:38, height:38, borderRadius:10, background:T.bg3, border:`1px solid ${T.border}`, color:T.teal, fontSize:20, cursor:"pointer" } }, "+")
+                                )
+                            ),
+                            React.createElement("div", { style: { background:T.bg3, borderRadius:12, padding:"14px 16px", marginBottom:18 } },
+                                [["Credits",qty+"t CO₂"],["Subtotal",fmtUSD(total)],["Fee (2%)",fmtUSD(total*0.02)]].map(([k,v]) =>
+                                    React.createElement("div", { key: k, style: { display:"flex", justifyContent:"space-between", fontSize:13, color:T.text2, marginBottom:6 } },
+                                        React.createElement("span", null, k),
+                                        React.createElement("span", null, v)
+                                    )
+                                ),
+                                React.createElement("div", { style: { height:1, background:"rgba(56,189,248,0.12)", margin:"14px 0" } }),
+                                React.createElement("div", { style: { display:"flex", justifyContent:"space-between", fontFamily:"'Outfit',sans-serif", fontWeight:800, fontSize:16 } },
+                                    React.createElement("span", null, "Total"),
+                                    React.createElement("span", { style: { color:T.green } }, fmtUSD(total*1.02))
+                                )
+                            ),
+                            React.createElement(Btn, { full: true, onClick:() => setPage(user?"checkout":"login"), style: { marginBottom:10 } }, user ? "💳 Proceed to Checkout" : "🔐 Login to Purchase"),
+                            React.createElement("p", { style: { textAlign:"center", fontSize:12, color:T.text3 } }, "🔒 Secure • Instant wallet credit")
+                        )
+                    )
+                )
+            );
+        }
+
+        function Checkout({ credit, setPage, user, token, showToast }) {
+            const [step, setStep] = useState(0);
+            const [cert, setCert] = useState("");
+            const [card, setCard] = useState({num:"",exp:"",cvv:"",name:""});
+            const qty = 1;
+            if (!credit) { setPage("marketplace"); return null; }
+            const total = qty * credit.price * 1.02;
+
+            const pay = async () => {
+                if (!card.num || !card.exp || !card.cvv || !card.name) return;
+                setStep(2);
+                await new Promise(r => setTimeout(r, 1500));
+                const newCert = genId();
+                storage.addOrder({
+                    id: Date.now().toString(),
+                    userId: user.email,
+                    creditId: credit.id,
+                    creditName: credit.name,
+                    registry: credit.registry,
+                    qty,
+                    priceEach: credit.price,
+                    total,
+                    certId: newCert,
+                    icon: credit.icon,
+                    color: credit.color,
+                    type: credit.type,
+                    retired: false,
+                    createdAt: new Date().toISOString()
+                });
+                setCert(newCert);
+                setStep(3);
+                showToast("Purchase successful! 🎉");
+            };
+
+            return React.createElement("div", { className: "fade", style: { maxWidth:640, margin:"0 auto", padding:"40px 24px" } },
+                React.createElement("button", { onClick:() => setPage("detail"), style: { background:"transparent", color:T.teal, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:13, marginBottom:24 } }, "← Back"),
+                React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:800, fontSize:26, marginBottom:24 } }, step===3 ? "Purchase Complete! 🎉" : "Checkout"),
+                step===2 && React.createElement(Card, { style: { padding:48, textAlign:"center" } },
+                    React.createElement(Spinner, null),
+                    React.createElement("div", { style: { marginTop:18, fontSize:16, fontWeight:600 } }, "Processing payment…")
+                ),
+                step===3 && React.createElement(Card, { style: { padding:32, textAlign:"center" } },
+                    React.createElement("div", { style: { fontSize:60, marginBottom:14 }, className: "float" }, "🎉"),
+                    React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontSize:22, fontWeight:800, color:T.green, marginBottom:8 } }, "Payment Successful!"),
+                    React.createElement("div", { style: { background:"rgba(52,211,153,0.08)", border:"1px solid rgba(52,211,153,0.2)", borderRadius:14, padding:18, marginBottom:20 } },
+                        React.createElement("div", { style: { fontSize:12, color:T.text3, marginBottom:4 } }, "Certificate ID"),
+                        React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:20, fontWeight:900, color:T.green } }, cert)
+                    ),
+                    React.createElement("div", { style: { display:"flex", gap:10 } },
+                        React.createElement(Btn, { full: true, variant:"outline", onClick:() => setPage("dashboard") }, "View Wallet"),
+                        React.createElement(Btn, { full: true, onClick:() => setPage("marketplace") }, "Buy More")
+                    )
+                ),
+                step===0 && React.createElement(Card, { style: { padding:24, marginBottom:18 } },
+                    React.createElement("h3", { style: { fontWeight:700, marginBottom:14 } }, "Order Summary"),
+                    React.createElement("div", { style: { display:"flex", gap:14, alignItems:"center", marginBottom:14 } },
+                        React.createElement("div", { style: { fontSize:32 } }, credit.icon),
+                        React.createElement("div", null,
+                            React.createElement("div", { style: { fontWeight:700 } }, credit.name),
+                            React.createElement("div", { style: { fontSize:13, color:T.text2 } }, credit.registry + " • " + credit.country)
+                        )
+                    ),
+                    React.createElement("div", { style: { height:1, background:"rgba(56,189,248,0.12)", margin:"14px 0" } }),
+                    [["Credits",qty+"t CO₂"],["Subtotal",fmtUSD(credit.price*qty)],["Fee (2%)",fmtUSD(credit.price*qty*0.02)]].map(([k,v]) =>
+                        React.createElement("div", { key: k, style: { display:"flex", justifyContent:"space-between", fontSize:14, color:T.text2, marginBottom:8 } },
+                            React.createElement("span", null, k),
+                            React.createElement("span", null, v)
+                        )
+                    ),
+                    React.createElement("div", { style: { height:1, background:"rgba(56,189,248,0.12)", margin:"14px 0" } }),
+                    React.createElement("div", { style: { display:"flex", justifyContent:"space-between", fontFamily:"'Outfit',sans-serif", fontWeight:800, fontSize:18 } },
+                        React.createElement("span", null, "Total"),
+                        React.createElement("span", { style: { color:T.green } }, fmtUSD(total))
+                    ),
+                    React.createElement(Btn, { full: true, onClick:() => setStep(1), style: { marginTop:18 } }, "Continue to Payment →")
+                ),
+                step===1 && React.createElement(Card, { style: { padding:28 } },
+                    React.createElement("h3", { style: { fontWeight:700, marginBottom:18 } }, "💳 Payment Details"),
+                    React.createElement(Inp, { label:"Cardholder Name", value:card.name, onChange: v => setCard(p => ({...p, name:v})), placeholder:"As on card", icon:"👤" }),
+                    React.createElement(Inp, { label:"Card Number", value:card.num, onChange: v => setCard(p => ({...p, num:v})), placeholder:"1234 5678 9012 3456", icon:"💳" }),
+                    React.createElement("div", { style: { display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+                        React.createElement(Inp, { label:"Expiry", value:card.exp, onChange: v => setCard(p => ({...p, exp:v})), placeholder:"MM/YY", icon:"📅" }),
+                        React.createElement(Inp, { label:"CVV", type:"password", value:card.cvv, onChange: v => setCard(p => ({...p, cvv:v})), placeholder:"•••", icon:"🔐" })
+                    ),
+                    React.createElement(Btn, { full: true, onClick: pay }, "🔒 Pay " + fmtUSD(total))
+                )
+            );
+        }
+
+        function Login({ setPage, login, showToast }) {
+            const [email, setEmail] = useState("");
+            const [pw, setPw] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [err, setErr] = useState("");
+            
+            const handle = async () => {
+                if (!email || !pw) { setErr("Enter email and password."); return; }
+                setLoading(true); setErr("");
+                await new Promise(r => setTimeout(r, 500));
+                const user = storage.findUser(email);
+                if (!user) { setErr("No account found with this email."); setLoading(false); return; }
+                if (user.password !== pw) { setErr("Incorrect password."); setLoading(false); return; }
+                login(user, "mock-token-" + Date.now());
+                showToast("Welcome back! 👋");
+                setPage("dashboard");
+                setLoading(false);
+            };
+            
+            return React.createElement("div", { className: "fade", style: { minHeight:"85vh", display:"flex", alignItems:"center", justifyContent:"center", padding:24 } },
+                React.createElement("div", { style: { width:"100%", maxWidth:420 } },
+                    React.createElement("div", { style: { textAlign:"center", marginBottom:32 } },
+                        React.createElement("div", { style: { fontSize:44, marginBottom:10 } }, "🌉"),
+                        React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:26, fontWeight:800, marginBottom:4 } }, "Welcome Back"),
+                        React.createElement("p", { style: { color:T.text2, fontSize:14 } }, "Sign in to your CarbonBridge account")
+                    ),
+                    React.createElement(Card, { style: { padding:32 } },
+                        err && React.createElement("div", { style: { background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:10, padding:"10px 14px", color:"#f87171", fontSize:13, marginBottom:16 } }, err),
+                        React.createElement(Inp, { label:"Email", type:"email", value:email, onChange:setEmail, placeholder:"you@example.com", icon:"✉️" }),
+                        React.createElement(Inp, { label:"Password", type:"password", value:pw, onChange:setPw, placeholder:"••••••••", icon:"🔐" }),
+                        React.createElement(Btn, { full: true, onClick:handle, disabled:loading }, loading ? [React.createElement(Spinner, null), " Signing in…"] : "Sign In →")
+                    ),
+                    React.createElement("p", { style: { textAlign:"center", marginTop:18, fontSize:14, color:T.text2 } }, "No account? ", React.createElement("span", { onClick:() => setPage("register"), style: { color:T.teal, fontWeight:700, cursor:"pointer" } }, "Sign up free"))
+                )
+            );
+        }
+
+        function Register({ setPage, login, showToast }) {
+            const [step, setStep] = useState(0);
+            const [role, setRole] = useState("");
+            const [form, setForm] = useState({name:"", email:"", pw:"", pw2:"", phone:"", company:"", country:"IN"});
+            const [otp, setOtp] = useState("");
+            const [genOtp, setGenOtp] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [uploaded, setUploaded] = useState(false);
+            const [errors, setErrors] = useState({});
+            
+            const steps = ["Account Type","Your Details","Verify Email","KYC","Done!"];
+            const f = (k, v) => setForm(p => ({...p, [k]: v}));
+            const err = k => errors[k];
+            
+            const next = async () => {
+                if (step === 0 && !role) { setErrors({role:"Select an account type"}); return; }
+                if (step === 1) {
+                    const e = {};
+                    if (!form.name.trim()) e.name = "Name required";
+                    if (!form.email.match(/^[^@]+@[^@]+\.[^@]+$/)) e.email = "Valid email required";
+                    if (form.pw.length < 8) e.pw = "Min 8 characters";
+                    if (form.pw !== form.pw2) e.pw2 = "Passwords don't match";
+                    if (role === "business" && !form.company.trim()) e.company = "Company name required";
+                    if (Object.keys(e).length) { setErrors(e); return; }
+                    const newOtp = genOTP();
+                    setGenOtp(newOtp);
+                    setLoading(true);
+                    await new Promise(r => setTimeout(r, 500));
+                    setLoading(false);
+                    setErrors({});
+                    setStep(2);
+                    return;
+                }
+                if (step === 2 && otp !== genOtp) { setErrors({otp:`Wrong OTP. Demo code: ${genOtp}`}); return; }
+                if (step === 3 && !uploaded) { setErrors({doc:"Please upload your ID"}); return; }
+                if (step === 3) {
+                    setLoading(true);
+                    await new Promise(r => setTimeout(r, 1000));
+                    const existing = storage.findUser(form.email);
+                    if (existing) {
+                        setLoading(false);
+                        setErrors({doc:"Email already registered."});
+                        return;
+                    }
+                    const newUser = {
+                        id: "user-" + Date.now(),
+                        name: form.name,
+                        email: form.email,
+                        password: form.pw,
+                        role: role || "individual",
+                        company: form.company,
+                        country: form.country,
+                        phone: form.phone,
+                        kycStatus: "verified"
+                    };
+                    storage.addUser(newUser);
+                    login(newUser, "mock-token-" + Date.now());
+                    setLoading(false);
+                    setErrors({});
+                    setStep(4);
+                    return;
+                }
+                if (step === 4) { showToast("Welcome to CarbonBridge! 🎉"); setPage("dashboard"); return; }
+                setErrors({});
+                setStep(s => s+1);
+            };
+            
+            return React.createElement("div", { className: "fade", style: { minHeight:"85vh", display:"flex", alignItems:"center", justifyContent:"center", padding:24 } },
+                React.createElement("div", { style: { width:"100%", maxWidth:520 } },
+                    React.createElement("div", { style: { textAlign:"center", marginBottom:28 } },
+                        React.createElement("div", { style: { fontSize:36, marginBottom:8 } }, "🌉"),
+                        React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:24, fontWeight:800 } }, "Create Your Account")
+                    ),
+                    React.createElement(ProgressBar, { steps, current: step }),
+                    React.createElement(Card, { style: { padding:32 } },
+                        step === 0 && React.createElement("div", null,
+                            React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:20, marginBottom:18 } }, "Choose Account Type"),
+                            errors.role && React.createElement("p", { style: { color:"#f87171", fontSize:13, marginBottom:10 } }, "⚠️ " + errors.role),
+                            [{val:"individual",icon:"👤",title:"Individual",desc:"Personal carbon footprint offsetting"},{val:"business",icon:"🏢",title:"Business",desc:"Bulk credits, ESG reporting, API access"},{val:"seller",icon:"🌿",title:"Project Developer",desc:"List and sell verified carbon credits"}].map(opt =>
+                                React.createElement("div", { key: opt.val, onClick:() => setRole(opt.val), style: { background:role===opt.val?"rgba(14,165,233,0.1)":"rgba(255,255,255,0.03)", border:`2px solid ${role===opt.val?"#38bdf8":"rgba(56,189,248,0.12)"}`, borderRadius:14, padding:"16px 18px", marginBottom:10, cursor:"pointer", display:"flex", gap:14, alignItems:"center", transition:"all .2s" } },
+                                    React.createElement("div", { style: { fontSize:28 } }, opt.icon),
+                                    React.createElement("div", null,
+                                        React.createElement("div", { style: { fontWeight:700, fontSize:14 } }, opt.title),
+                                        React.createElement("div", { style: { fontSize:12, color:T.text2, marginTop:2 } }, opt.desc)
+                                    )
+                                )
+                            )
+                        ),
+                        step === 1 && React.createElement("div", null,
+                            React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:20, marginBottom:18 } }, "Your Details"),
+                            React.createElement(Inp, { label:"Full Name *", value:form.name, onChange: v => f("name",v), placeholder:"John Doe", icon:"👤", error: err("name") }),
+                            React.createElement(Inp, { label:"Email *", type:"email", value:form.email, onChange: v => f("email",v), placeholder:"you@example.com", icon:"✉️", error: err("email") }),
+                            role === "business" && React.createElement(Inp, { label:"Company Name *", value:form.company, onChange: v => f("company",v), placeholder:"Acme Corp", icon:"🏢", error: err("company") }),
+                            React.createElement(Inp, { label:"Phone", value:form.phone, onChange: v => f("phone",v), placeholder:"+91 98765 43210", icon:"📱" }),
+                            React.createElement(Inp, { label:"Password *", type:"password", value:form.pw, onChange: v => f("pw",v), placeholder:"Min 8 chars", icon:"🔒", error: err("pw") }),
+                            React.createElement(Inp, { label:"Confirm Password *", type:"password", value:form.pw2, onChange: v => f("pw2",v), placeholder:"Re-enter", icon:"🔒", error: err("pw2") }),
+                            React.createElement("div", { style: { marginBottom:18 } },
+                                React.createElement("label", { style: { display:"block", fontSize:13, fontWeight:600, color:T.text2, marginBottom:6 } }, "Country"),
+                                React.createElement("select", { value:form.country, onChange: e => f("country", e.target.value), style: { width:"100%", background:T.bg2, border:`1.5px solid rgba(56,189,248,0.12)`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:14, outline:"none" } },
+                                    [{value:"IN",label:"🇮🇳 India"},{value:"US",label:"🇺🇸 United States"},{value:"GB",label:"🇬🇧 UK"},{value:"SG",label:"🇸🇬 Singapore"},{value:"AE",label:"🇦🇪 UAE"}].map(o =>
+                                        React.createElement("option", { key: o.value, value:o.value }, o.label)
+                                    )
+                                )
+                            )
+                        ),
+                        step === 2 && React.createElement("div", { style: { textAlign:"center" } },
+                            React.createElement("div", { style: { fontSize:52, marginBottom:14 }, className: "float" }, "📧"),
+                            React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:20, marginBottom:8 } }, "Verify Email"),
+                            React.createElement("p", { style: { color:T.text2, fontSize:14, marginBottom:20 } }, "Sent to ", React.createElement("strong", { style: { color:T.teal } }, form.email)),
+                            React.createElement("div", { style: { background:"rgba(56,189,248,0.08)", border:"1px solid rgba(56,189,248,0.25)", borderRadius:10, padding:"10px", marginBottom:16, fontSize:13, color:T.teal } }, "Demo OTP: ", React.createElement("strong", null, genOtp)),
+                            React.createElement("input", { value: otp, onChange: e => setOtp(e.target.value), maxLength:6, placeholder:"6-digit code", style: { width:"100%", background:T.bg3, border:`1.5px solid ${errors.otp?"#f87171":T.border}`, borderRadius:12, padding:"14px", textAlign:"center", fontSize:24, fontFamily:"'Outfit',sans-serif", fontWeight:700, color:T.text, letterSpacing:8, outline:"none" } }),
+                            errors.otp && React.createElement("p", { style: { color:"#f87171", fontSize:12, marginTop:6 } }, errors.otp)
+                        ),
+                        step === 3 && React.createElement("div", null,
+                            React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:20, marginBottom:14 } }, "KYC Verification"),
+                            React.createElement("div", { onClick:() => setUploaded(true), style: { border:`2px dashed ${uploaded?T.green:errors.doc?"#f87171":T.border}`, borderRadius:14, padding:"28px", textAlign:"center", cursor:"pointer", background:uploaded?"rgba(52,211,153,0.04)":"transparent", transition:"all .2s" } },
+                                uploaded ? [React.createElement("div", { style: { fontSize:32, marginBottom:6 } }, "✅"), React.createElement("div", { style: { color:T.green, fontWeight:700 } }, "Document Uploaded!")] :
+                                [React.createElement("div", { style: { fontSize:32, marginBottom:6 } }, "📤"), React.createElement("div", { style: { fontWeight:600, fontSize:14 } }, "Click to Upload ID Document"), React.createElement("div", { style: { color:T.text3, fontSize:12, marginTop:4 } }, "Passport / Aadhaar / PAN • PDF, JPG, PNG")]
+                            ),
+                            errors.doc && React.createElement("p", { style: { color:"#f87171", fontSize:12, marginTop:6 } }, errors.doc)
+                        ),
+                        step === 4 && React.createElement("div", { style: { textAlign:"center" } },
+                            React.createElement("div", { style: { fontSize:60, marginBottom:14 }, className: "float" }, "🎉"),
+                            React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:800, fontSize:24, marginBottom:8, background:T.grad, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" } }, "You're All Set!"),
+                            React.createElement("p", { style: { color:T.text2, fontSize:14 } }, "Welcome, ", React.createElement("strong", { style: { color:T.teal } }, form.name.split(" ")[0]), "! Your account is verified.")
+                        ),
+                        React.createElement("div", { style: { marginTop:22, display:"flex", justifyContent:"space-between", gap:10 } },
+                            step > 0 && step < 4 && React.createElement("button", { onClick:() => setStep(s => s-1), disabled:loading, style: { background:"rgba(56,189,248,0.07)", color:T.teal, border:"none", borderRadius:10, padding:"10px 22px", cursor:"pointer", fontWeight:700, fontSize:14 } }, "← Back"),
+                            React.createElement("button", { onClick:next, disabled:loading, style: { flex:1, background:T.grad, color:"#fff", border:"none", borderRadius:10, padding:12, fontFamily:"'Outfit',sans-serif", fontWeight:800, fontSize:15, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1 } },
+                                loading ? [React.createElement(Spinner, null), " Processing…"] : (step===4?"Go to Dashboard →":step===3?"Submit & Verify →":"Continue →")
+                            )
+                        )
+                    ),
+                    React.createElement("p", { style: { textAlign:"center", marginTop:18, fontSize:14, color:T.text2 } }, "Have an account? ", React.createElement("span", { onClick:() => setPage("login"), style: { color:T.teal, fontWeight:700, cursor:"pointer" } }, "Sign in"))
+                )
+            );
+        }
+
+        function Dashboard({ user, setPage, showToast }) {
+            const [tab, setTab] = useState("wallet");
+            const orders = storage.getUserOrders(user.email);
+            const active = orders.filter(o => !o.retired);
+            const retired = orders.filter(o => o.retired);
+            const totalOffset = retired.reduce((a, b) => a + b.qty, 0);
+            const totalSpent = orders.reduce((a, b) => a + b.total, 0);
+            
+            const retire = async (order) => {
+                order.retired = true;
+                order.retiredAt = new Date().toISOString();
+                storage.saveOrders();
+                showToast("Credits retired! 🌿");
+                // Force re-render
+                setTab(tab => tab);
+            };
+            
+            return React.createElement("div", { className: "fade", style: { maxWidth:1100, margin:"0 auto", padding:"40px 24px" } },
+                React.createElement("div", { style: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:28, flexWrap:"wrap", gap:14 } },
+                    React.createElement("div", null,
+                        React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:28, fontWeight:800, marginBottom:6 } }, "Welcome back, ", user.name.split(" ")[0], " 👋"),
+                        React.createElement("div", { style: { display:"flex", gap:8 } },
+                            React.createElement(Badge, { color: T.teal }, user.role),
+                            React.createElement(Badge, { color: T.green }, "KYC Verified ✅")
+                        )
+                    ),
+                    React.createElement(Btn, { onClick:() => setPage("marketplace") }, "+ Buy Credits")
+                ),
+                React.createElement("div", { style: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:14, marginBottom:28 } },
+                    [{l:"Active Credits",v:active.reduce((a,b)=>a+b.qty,0)+"t",icon:"💼",color:T.teal},{l:"CO₂ Offset",v:totalOffset+"t",icon:"🌍",color:T.green},{l:"Total Invested",v:fmtUSD(totalSpent),icon:"💰",color:"#f59e0b"},{l:"Projects",v:orders.length,icon:"📋",color:"#8b5cf6"}].map(s =>
+                        React.createElement(Card, { key: s.l, style: { padding:18 } },
+                            React.createElement("div", { style: { fontSize:26, marginBottom:6 } }, s.icon),
+                            React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:22, fontWeight:800, color:s.color } }, s.v),
+                            React.createElement("div", { style: { fontSize:12, color:T.text3, marginTop:2 } }, s.l)
+                        )
+                    )
+                ),
+                React.createElement("div", { style: { display:"flex", gap:0, marginBottom:22, borderBottom:`1px solid ${T.border}` } },
+                    [["wallet","💼 Wallet"],["history","📊 History"],["certs","📜 Certificates"]].map(([k,l]) =>
+                        React.createElement("button", { key: k, onClick:() => setTab(k), style: { background:"transparent", color:tab===k?T.teal:T.text2, border:"none", borderBottom:tab===k?`2px solid ${T.teal}`:"2px solid transparent", padding:"10px 18px", cursor:"pointer", fontSize:14, fontWeight:600, marginBottom:-1 } }, l)
+                    )
+                ),
+                tab === "wallet" && (active.length === 0 ? 
+                    React.createElement("div", { style: { textAlign:"center", padding:60 } },
+                        React.createElement("div", { style: { fontSize:48, marginBottom:14 } }, "💼"),
+                        React.createElement("p", { style: { color:T.text2, marginBottom:20 } }, "No active credits. Buy some!"),
+                        React.createElement(Btn, { onClick:() => setPage("marketplace") }, "Browse Credits →")
+                    ) :
+                    React.createElement("div", { style: { display:"flex", flexDirection:"column", gap:12 } },
+                        active.map(o =>
+                            React.createElement(Card, { key: o.id, style: { padding:20, display:"flex", gap:18, alignItems:"center", flexWrap:"wrap" } },
+                                React.createElement("div", { style: { fontSize:28 } }, o.icon),
+                                React.createElement("div", { style: { flex:1, minWidth:160 } },
+                                    React.createElement("div", { style: { fontWeight:700, fontSize:14 } }, o.creditName),
+                                    React.createElement("div", { style: { fontSize:12, color:T.text2, marginTop:2 } }, o.registry + " • " + new Date(o.createdAt).toLocaleDateString()),
+                                    React.createElement(Badge, { color: T.teal, style: { marginTop:8 } }, "Active")
+                                ),
+                                React.createElement("div", { style: { textAlign:"center" } },
+                                    React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:20, fontWeight:800, color:T.green } }, o.qty + "t"),
+                                    React.createElement("div", { style: { fontSize:11, color:T.text3 } }, "CO₂")
+                                ),
+                                React.createElement("div", { style: { textAlign:"center" } },
+                                    React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:15, fontWeight:700 } }, fmtUSD(o.total)),
+                                    React.createElement("div", { style: { fontSize:11, color:T.text3 } }, "Paid")
+                                ),
+                                React.createElement(Btn, { size:"sm", variant:"success", onClick:() => retire(o) }, "🌿 Retire")
+                            )
+                        )
+                    )
+                ),
+                tab === "history" && (orders.length === 0 ?
+                    React.createElement("div", { style: { textAlign:"center", padding:60, color:T.text3 } }, "No transactions yet.") :
+                    React.createElement(Card, { style: { overflow:"hidden" } },
+                        React.createElement("table", { style: { width:"100%", borderCollapse:"collapse" } },
+                            React.createElement("thead", null,
+                                React.createElement("tr", { style: { borderBottom:`1px solid ${T.border}` } },
+                                    ["Date","Project","Qty","Total","Status"].map(h =>
+                                        React.createElement("th", { key: h, style: { padding:"12px 14px", textAlign:"left", fontSize:11, color:T.text3, fontWeight:700, textTransform:"uppercase" } }, h)
+                                    )
+                                )
+                            ),
+                            React.createElement("tbody", null,
+                                orders.map(o =>
+                                    React.createElement("tr", { key: o.id, style: { borderBottom:`1px solid ${T.border}` } },
+                                        React.createElement("td", { style: { padding:"13px 14px", fontSize:13, color:T.text2 } }, new Date(o.createdAt).toLocaleDateString()),
+                                        React.createElement("td", { style: { padding:"13px 14px", fontSize:13, fontWeight:600 } }, o.icon + " " + o.creditName),
+                                        React.createElement("td", { style: { padding:"13px 14px", fontSize:13 } }, o.qty + "t"),
+                                        React.createElement("td", { style: { padding:"13px 14px", fontSize:13, fontWeight:700, color:T.green } }, fmtUSD(o.total)),
+                                        React.createElement("td", { style: { padding:"13px 14px" } }, o.retired ? React.createElement(Badge, { color: T.green }, "Retired") : React.createElement(Badge, { color: T.teal }, "Active"))
+                                    )
+                                )
+                            )
+                        )
+                    )
+                ),
+                tab === "certs" && (retired.length === 0 ?
+                    React.createElement("div", { style: { textAlign:"center", padding:60, color:T.text3 } },
+                        React.createElement("div", { style: { fontSize:44, marginBottom:12 } }, "📜"),
+                        React.createElement("p", null, "Retire credits to generate certificates.")
+                    ) :
+                    React.createElement("div", { style: { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))", gap:18 } },
+                        retired.map(o =>
+                            React.createElement("div", { key: o.id, style: { background:"linear-gradient(135deg,rgba(52,211,153,0.07),rgba(14,165,233,0.05))", border:"1.5px solid rgba(52,211,153,0.25)", borderRadius:20, padding:24 } },
+                                React.createElement("div", { style: { display:"flex", justifyContent:"space-between", marginBottom:14 } },
+                                    React.createElement("div", { style: { fontSize:11, color:T.green, fontWeight:700, letterSpacing:1 } }, "RETIREMENT CERTIFICATE"),
+                                    React.createElement(Badge, { color: T.green }, "✅ Verified")
+                                ),
+                                React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:18, fontWeight:800, marginBottom:4 } }, o.certId),
+                                React.createElement("div", { style: { fontSize:13, color:T.text2, marginBottom:14 } }, o.creditName),
+                                React.createElement("div", { style: { display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 } },
+                                    [["Offset",`${o.qty}t CO₂`],["Date",new Date(o.retiredAt).toLocaleDateString()],["Registry",o.registry],["Issued To",user.name.split(" ")[0]]].map(([k,v]) =>
+                                        React.createElement("div", { key: k, style: { background:"rgba(0,0,0,0.2)", borderRadius:8, padding:"8px 10px" } },
+                                            React.createElement("div", { style: { fontSize:10, color:T.text3 } }, k),
+                                            React.createElement("div", { style: { fontSize:12, fontWeight:700, color:T.text, marginTop:2 } }, v)
+                                        )
+                                    )
+                                ),
+                                React.createElement(Btn, { full: true, size:"sm", variant:"success" }, "⬇️ Download Certificate")
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        function HowItWorks({ setPage }) {
+            const items = [
+                { icon:"🌿", t:"What is a Carbon Credit?", b:"One carbon credit = one tonne of CO₂ reduced, avoided, or removed from the atmosphere. When you buy and retire a credit, you compensate for emissions you've made elsewhere — making your net impact lower or zero." },
+                { icon:"✅", t:"How Are Credits Verified?", b:"Every credit on CarbonBridge is registered on a third-party registry — Verra (VCS), Gold Standard, or ACR. These organizations require independent auditors to verify that the carbon reduction is real, measurable, permanent, and additional." },
+                { icon:"👤", t:"Can Individuals Buy Credits?", b:"Yes! There are no legal restrictions on individuals buying voluntary carbon credits. You can offset a flight, your annual lifestyle footprint, or a special event — starting from as little as $7.50 per tonne." },
+                { icon:"🔁", t:"What Does Retirement Mean?", b:"Retiring a credit permanently removes it from circulation. No one else can use that tonne to claim an offset. You receive a retirement certificate as proof, and the retirement is recorded on the public registry permanently." },
+                { icon:"🏢", t:"How Do Businesses Use Credits?", b:"Businesses use carbon credits for ESG reporting, net-zero pledges, and stakeholder communication. CarbonBridge provides bulk pricing, invoicing, and ESG-ready reports for corporate buyers." }
+            ];
+            return React.createElement("div", { className: "fade", style: { maxWidth:860, margin:"0 auto", padding:"60px 24px" } },
+                React.createElement("div", { style: { textAlign:"center", marginBottom:52 } },
+                    React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:38, fontWeight:900, marginBottom:10 } }, "How It Works"),
+                    React.createElement("p", { style: { color:T.text2, fontSize:15 } }, "Everything you need to know about buying, selling, and retiring carbon credits.")
+                ),
+                items.map((item, i) => 
+                    React.createElement("div", { key: i, style: { display:"flex", gap:22, marginBottom:22, background:T.bg2, border:`1px solid ${T.border}`, borderRadius:18, padding:26 } },
+                        React.createElement("div", { style: { fontSize:36, flexShrink:0 } }, item.icon),
+                        React.createElement("div", null,
+                            React.createElement("h3", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:18, marginBottom:8 } }, item.t),
+                            React.createElement("p", { style: { color:T.text2, fontSize:14, lineHeight:1.75 } }, item.b)
+                        )
+                    )
+                ),
+                React.createElement("div", { style: { textAlign:"center", marginTop:44, display:"flex", gap:12, justifyContent:"center" } },
+                    React.createElement(Btn, { onClick:() => setPage("register") }, "Create Account →"),
+                    React.createElement(Btn, { variant:"outline", onClick:() => setPage("marketplace") }, "Browse Credits")
+                )
+            );
+        }
+
+        function Business({ setPage }) {
+            const plans = [
+                { tier:"Startup", price:"$199/mo", features:["500 credits/month","Basic ESG Dashboard","PDF Certificates","Email Support"], color:T.teal, hot:false },
+                { tier:"Business", price:"$799/mo", features:["Unlimited credits","Advanced ESG Reporting","API Access","Dedicated Manager","Custom Branding"], color:T.green, hot:true },
+                { tier:"Enterprise", price:"Custom", features:["White-label solution","Registry API Integration","Multi-entity management","SLA Support","Custom workflows"], color:"#a78bfa", hot:false }
+            ];
+            return React.createElement("div", { className: "fade", style: { maxWidth:960, margin:"0 auto", padding:"60px 24px" } },
+                React.createElement("div", { style: { textAlign:"center", marginBottom:52 } },
+                    React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:38, fontWeight:900, marginBottom:10 } }, "For Businesses & Enterprises"),
+                    React.createElement("p", { style: { color:T.text2, fontSize:15, maxWidth:500, margin:"0 auto" } }, "Bulk credits, ESG dashboards, employee offset programs, and white-label solutions.")
+                ),
+                React.createElement("div", { style: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(270px,1fr))", gap:20, marginBottom:52 } },
+                    plans.map(plan => 
+                        React.createElement("div", { key: plan.tier, style: { background:plan.hot?"linear-gradient(135deg,rgba(14,165,233,0.1),rgba(52,211,153,0.08))":T.bg2, border:`2px solid ${plan.hot?plan.color:T.border}`, borderRadius:22, padding:28, position:"relative" } },
+                            plan.hot && React.createElement("div", { style: { position:"absolute", top:-13, left:"50%", transform:"translateX(-50%)", background:T.grad, color:"#fff", borderRadius:20, padding:"4px 16px", fontSize:12, fontWeight:700 } }, "MOST POPULAR"),
+                            React.createElement("h3", { style: { fontFamily:"'Outfit',sans-serif", fontSize:20, fontWeight:800, color:plan.color, marginBottom:6 } }, plan.tier),
+                            React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontSize:30, fontWeight:900, marginBottom:22 } }, plan.price),
+                            plan.features.map(f => 
+                                React.createElement("div", { key: f, style: { display:"flex", gap:8, marginBottom:10, fontSize:14, color:T.text2 } },
+                                    React.createElement("span", { style: { color:plan.color } }, "✓"),
+                                    f
+                                )
+                            ),
+                            React.createElement(Btn, { full: true, variant:plan.hot?"primary":"outline", onClick:() => setPage("register"), style: { marginTop:18 } }, "Get Started →")
+                        )
+                    )
+                ),
+                React.createElement("div", { style: { textAlign:"center" } },
+                    React.createElement("p", { style: { color:T.text2, marginBottom:14 } }, "Need a custom solution?"),
+                    React.createElement(Btn, { variant:"ghost" }, "📩 Contact Sales")
+                )
+            );
+        }
+
+        function Sell({ setPage, user, showToast }) {
+            const [step, setStep] = useState(0);
+            const [submitted, setSubmitted] = useState(false);
+            const steps = ["Project Info","Verification","Pricing","Submit"];
+            
+            const submit = async () => { 
+                setSubmitted(true); 
+                showToast("Project submitted! 🌿"); 
+            };
+            
+            if (submitted) return React.createElement("div", { className: "fade", style: { maxWidth:520, margin:"60px auto", padding:24, textAlign:"center" } },
+                React.createElement("div", { style: { fontSize:60, marginBottom:14 }, className: "float" }, "🌿"),
+                React.createElement("h2", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:800, fontSize:26, marginBottom:8, color:T.green } }, "Project Submitted!"),
+                React.createElement("p", { style: { color:T.text2, fontSize:14, lineHeight:1.75, marginBottom:28 } }, "Your project is under review. Approval within 24–48 hours."),
+                React.createElement(Btn, { onClick:() => setPage("home") }, "Back to Home")
+            );
+            
+            return React.createElement("div", { className: "fade", style: { maxWidth:600, margin:"0 auto", padding:"40px 24px" } },
+                React.createElement("h1", { style: { fontFamily:"'Outfit',sans-serif", fontSize:28, fontWeight:800, marginBottom:6 } }, "List Your Carbon Project"),
+                React.createElement("p", { style: { color:T.text2, marginBottom:28, fontSize:14 } }, "5% commission on sales only. No upfront listing fees."),
+                React.createElement(ProgressBar, { steps, current: step }),
+                React.createElement(Card, { style: { padding:30 } },
+                    step === 0 && [
+                        React.createElement("h3", { style: { fontWeight:700, marginBottom:18 } }, "Project Information"),
+                        React.createElement(Inp, { label:"Project Name *", placeholder:"e.g. Amazon Rainforest REDD+", icon:"🌿" }),
+                        React.createElement("div", { style: { marginBottom:18 } },
+                            React.createElement("label", { style: { display:"block", fontSize:13, fontWeight:600, color:T.text2, marginBottom:6 } }, "Project Type *"),
+                            React.createElement("select", { style: { width:"100%", background:T.bg2, border:`1.5px solid rgba(56,189,248,0.12)`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:14, outline:"none" } },
+                                ["Forestry & Land Use","Renewable Energy","Clean Cooking","Blue Carbon","Conservation","Waste Management","Clean Energy"].map(t => 
+                                    React.createElement("option", { key: t, value: t }, t)
+                                )
+                            )
+                        ),
+                        React.createElement("div", { style: { marginBottom:18 } },
+                            React.createElement("label", { style: { display:"block", fontSize:13, fontWeight:600, color:T.text2, marginBottom:6 } }, "Country *"),
+                            React.createElement("select", { style: { width:"100%", background:T.bg2, border:`1.5px solid rgba(56,189,248,0.12)`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:14, outline:"none" } },
+                                ["","India","Brazil","Indonesia","Kenya","Mexico","Malaysia","Nepal","Vietnam"].map(c => 
+                                    React.createElement("option", { key: c, value: c }, c || "Select country…")
+                                )
+                            )
+                        ),
+                        React.createElement(Inp, { label:"Project Description *", placeholder:"Describe the project and its impact…" })
+                    ],
+                    step === 1 && [
+                        React.createElement("h3", { style: { fontWeight:700, marginBottom:18 } }, "Verification"),
+                        React.createElement("div", { style: { marginBottom:18 } },
+                            React.createElement("label", { style: { display:"block", fontSize:13, fontWeight:600, color:T.text2, marginBottom:6 } }, "Registry *"),
+                            React.createElement("select", { style: { width:"100%", background:T.bg2, border:`1.5px solid rgba(56,189,248,0.12)`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:14, outline:"none" } },
+                                ["Verra VCS","Gold Standard","ACR","Climate Action Reserve"].map(r => 
+                                    React.createElement("option", { key: r, value: r }, r)
+                                )
+                            )
+                        ),
+                        React.createElement(Inp, { label:"Registry Certificate ID *", placeholder:"VCS-2301-BR", icon:"📋", hint:"From your registry project page" })
+                    ],
+                    step === 2 && [
+                        React.createElement("h3", { style: { fontWeight:700, marginBottom:18 } }, "Pricing"),
+                        React.createElement(Inp, { label:"Credits Available (tonnes) *", type:"number", placeholder:"5000", icon:"📊" }),
+                        React.createElement(Inp, { label:"Price per tonne (USD) *", type:"number", placeholder:"15.00", icon:"💵", hint:"Market avg: $8–$25/t" })
+                    ],
+                    step === 3 && [
+                        React.createElement("h3", { style: { fontWeight:700, marginBottom:18 } }, "Review & Submit"),
+                        [["Name","Amazon Rainforest REDD+"],["Type","Forestry & Land Use"],["Country","Brazil"],["Registry","Verra VCS"],["Cert ID","VCS-2301-BR"],["Credits","10,000t"],["Price","$14.50/t"]].map(([k,v]) =>
+                            React.createElement("div", { key: k, style: { display:"flex", justifyContent:"space-between", background:T.bg3, borderRadius:10, padding:"10px 14px", marginBottom:8 } },
+                                React.createElement("span", { style: { fontSize:13, color:T.text2 } }, k),
+                                React.createElement("span", { style: { fontSize:13, fontWeight:700 } }, v)
+                            )
+                        )
+                    ]
+                ),
+                React.createElement("div", { style: { marginTop:20, display:"flex", gap:10 } },
+                    step > 0 && React.createElement(Btn, { variant:"ghost", onClick:() => setStep(s => s-1) }, "← Back"),
+                    step < 3 ? React.createElement(Btn, { full: step===0, onClick:() => setStep(s => s+1) }, "Continue →") :
+                    React.createElement(Btn, { full: true, onClick: submit }, "🌿 Submit for Review")
+                ),
+                !user && React.createElement("p", { style: { textAlign:"center", marginTop:14, fontSize:13, color:T.text2 } }, "Need to ", React.createElement("span", { onClick:() => setPage("register"), style: { color:T.teal, cursor:"pointer", fontWeight:700 } }, "create an account"), " first.")
+            );
+        }
+
+        // =========== MAIN APP ===========
+        function App() {
+            const [page, setPage] = useState("home");
+            const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem("cb_user")); } catch { return null; } });
+            const [token, setToken] = useState(() => localStorage.getItem("cb_token") || null);
+            const [selectedCredit, setSelectedCredit] = useState(null);
+            const [toast, setToast] = useState(null);
+            
+            useEffect(() => { user ? localStorage.setItem("cb_user", JSON.stringify(user)) : localStorage.removeItem("cb_user"); }, [user]);
+            useEffect(() => { token ? localStorage.setItem("cb_token", token) : localStorage.removeItem("cb_token"); }, [token]);
+            
+            const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
+            const navigate = (p) => { setPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); };
+            const login = (u, t) => { setUser(u); setToken(t); };
+            const logout = () => { setUser(null); setToken(null); navigate("home"); };
+            
+            return React.createElement("div", null,
+                React.createElement("style", null, "nav{position:sticky;top:0;z-index:200;background:rgba(4,8,15,0.94);backdrop-filter:blur(16px);border-bottom:1px solid rgba(56,189,248,0.12);padding:0 24px;height:64px;display:flex;align-items:center;justify-content:space-between;}"),
+                React.createElement("nav", null,
+                    React.createElement("div", { onClick:() => setPage("home"), style: { display:"flex", alignItems:"center", gap:10, cursor:"pointer" } },
+                        React.createElement("div", { style: { width:36, height:36, borderRadius:10, background:T.grad, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 } }, "🌉"),
+                        React.createElement("div", null,
+                            React.createElement("div", { style: { fontFamily:"'Outfit',sans-serif", fontWeight:900, fontSize:18, background:T.grad, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1 } }, "CarbonBridge"),
+                            React.createElement("div", { style: { fontSize:9, color:T.text3, letterSpacing:.5 } }, "by Nomad Life Corporation")
+                        )
+                    ),
+                    React.createElement("div", { style: { display:"flex", gap:2 } },
+                        (user ? (user.role === "seller" ? [["Marketplace","marketplace"],["Dashboard","dashboard"],["My Listings","sell"]] : [["Marketplace","marketplace"],["Dashboard","dashboard"],["ESG Report","dashboard"]]) : [["Marketplace","marketplace"],["How It Works","howitworks"],["For Business","business"],["Sell Credits","sell"]]).map(([label,p]) =>
+                            React.createElement("button", { key: p, onClick:() => setPage(p), style: { background:"transparent", color:page===p?T.teal:T.text2, border:"none", borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:13, fontWeight:600 } }, label)
+                        )
+                    ),
+                    React.createElement("div", { style: { display:"flex", gap:8, alignItems:"center" } },
+                        user ? [
+                            React.createElement("div", { key:"user", onClick:() => setPage("dashboard"), style: { display:"flex", alignItems:"center", gap:8, background:T.bg2, border:`1px solid ${T.border}`, borderRadius:10, padding:"6px 12px", cursor:"pointer" } },
+                                React.createElement("div", { style: { width:28, height:28, borderRadius:8, background:T.grad, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:"#fff" } }, user.name.charAt(0).toUpperCase()),
+                                React.createElement("div", null,
+                                    React.createElement("div", { style: { fontSize:12, fontWeight:700, color:T.text } }, user.name.split(" ")[0]),
+                                    React.createElement("div", { style: { fontSize:10, color:T.text3 } }, user.role)
+                                )
+                            ),
+                            React.createElement(Btn, { key:"logout", size:"sm", variant:"ghost", onClick:logout }, "Sign Out")
+                        ] : [
+                            React.createElement(Btn, { key:"login", size:"sm", variant:"outline", onClick:() => setPage("login") }, "Login"),
+                            React.createElement(Btn, { key:"reg", size:"sm", onClick:() => setPage("register") }, "Get Started")
+                        ]
+                    )
+                ),
+                toast && React.createElement("div", { style: { position:"fixed", top:80, right:24, background:toast.type==="success"?"rgba(16,185,129,0.15)":"rgba(239,68,68,0.15)", border:`1px solid ${toast.type==="success"?"rgba(52,211,153,0.4)":"rgba(239,68,68,0.4)"}`, backdropFilter:"blur(12px)", borderRadius:12, padding:"12px 20px", color:toast.type==="success"?T.green:"#f87171", fontWeight:600, fontSize:14, zIndex:9999, boxShadow:"0 8px 32px rgba(0,0,0,0.4)", animation:"fadeIn .3s ease" } },
+                    toast.type === "success" ? "✅" : "❌", " ", toast.msg
+                ),
+                page === "home" && React.createElement(Home, { setPage }),
+                page === "marketplace" && React.createElement(Marketplace, { setPage, setSelectedCredit }),
+                page === "detail" && selectedCredit && React.createElement(CreditDetail, { credit: selectedCredit, setPage, user }),
+                page === "checkout" && user && selectedCredit && React.createElement(Checkout, { credit: selectedCredit, setPage, user, token, showToast }),
+                page === "login" && React.createElement(Login, { setPage, login, showToast }),
+                page === "register" && React.createElement(Register, { setPage, login, showToast }),
+                page === "dashboard" && (user ? React.createElement(Dashboard, { user, setPage, showToast }) : (() => { navigate("login"); return null; })()),
+                page === "howitworks" && React.createElement(HowItWorks, { setPage }),
+                page === "business" && React.createElement(Business, { setPage }),
+                page === "sell" && React.createElement(Sell, { setPage, user, showToast })
+            );
+        }
+        
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
